@@ -96,7 +96,8 @@ TRANSLATIONS = {
         "help_title": "使用说明",
         "help_content": "1. 填写 Cloudflare 账户、KV 命名空间及 API Token 并保存。\n2. 将 VPK 或 压缩包 拖入虚线框，程序会自动解析。\n3. 在表格中可双击修改显示的章节名称。\n4. 点击底部按钮将修改后的内容上传到云端 KV。\n\n*支持批量拖入多文件，系统会自动进行多线程加速解析。*",
         "update_checking": "正在检查更新...",
-        "update_latest": "当前已经是最新版本！"
+        "update_latest": "当前已经是最新版本！",
+        "update_restarting": "正在重启以应用更新..."
     },
     "english": {
         "window_title": "L4D2 VPK Map Reader & CF KV Uploader",
@@ -171,7 +172,8 @@ TRANSLATIONS = {
         "help_title": "How to Use",
         "help_content": "1. Fill in Cloudflare Account, KV Namespace & API Token, then Save.\n2. Drag & drop VPK or archives into the dashed box to parse automatically.\n3. Double-click to edit chapter names in the table.\n4. Click the bottom button to upload the changes to your KV.\n\n*Supports dragging multiple files at once with multi-threading acceleration.*",
         "update_checking": "Checking for updates...",
-        "update_latest": "You are already using the latest version!"
+        "update_latest": "You are already using the latest version!",
+        "update_restarting": "Restarting to apply update..."
     },
     "russian": {
         "window_title": "L4D2 VPK Map Reader & CF KV Uploader",
@@ -246,7 +248,8 @@ TRANSLATIONS = {
         "help_title": "Как использовать",
         "help_content": "1. Заполните Cloudflare Account, KV Namespace и API Token, затем сохраните.\n2. Перетащите VPK или архивы в пунктирное поле для автоматического анализа.\n3. Дважды щелкните, чтобы изменить названия глав в таблице.\n4. Нажмите нижнюю кнопку, чтобы загрузить изменения в ваш KV.\n\n*Поддерживается перетаскивание нескольких файлов одновременно с многопоточным ускорением.*",
         "update_checking": "Проверка обновлений...",
-        "update_latest": "У вас уже установлена последняя версия!"
+        "update_latest": "У вас уже установлена последняя версия!",
+        "update_restarting": "Перезагрузка для применения обновления..."
     },
     "spanish": {
         "window_title": "L4D2 VPK Map Reader & CF KV Uploader",
@@ -321,7 +324,8 @@ TRANSLATIONS = {
         "help_title": "Cómo usar",
         "help_content": "1. Complete la Cuenta de Cloudflare, KV Namespace y API Token, luego Guarde.\n2. Arrastre y suelte archivos VPK o archivos en el cuadro punteado para analizar automáticamente.\n3. Haga doble clic para editar los nombres de los capítulos en la tabla.\n4. Haga clic en el botón inferior para cargar los cambios en su KV.\n\n*Soporta arrastrar múltiples archivos a la vez con aceleración multihilo.*",
         "update_checking": "Buscando actualizaciones...",
-        "update_latest": "¡Ya estás usando la última versión!"
+        "update_latest": "¡Ya estás usando la última versión!",
+        "update_restarting": "Reiniciando para aplicar la actualización..."
     },
     "japanese": {
         "window_title": "L4D2 VPK Map Reader & CF KV Uploader",
@@ -396,7 +400,8 @@ TRANSLATIONS = {
         "help_title": "使い方",
         "help_content": "1. Cloudflare Account、KV Namespace、API Token を入力して保存します。\n2. VPK またはアーカイブを点線のボックスにドラッグ＆ドロップして自動解析します。\n3. 表内のチャプター名をダブルクリックして編集できます。\n4. 下部のボタンをクリックして変更を KV にアップロードします。\n\n*マルチスレッドによる複数ファイルの同時ドラッグに対応しています。*",
         "update_checking": "更新を確認しています...",
-        "update_latest": "すでに最新バージョンを使用しています！"
+        "update_latest": "すでに最新バージョンを使用しています！",
+        "update_restarting": "更新を適用するために再起動しています..."
     },
     "tchinese": {
         "window_title": "惡靈勢力2 VPK地圖解析與 Cloudflare KV 上傳工具",
@@ -471,7 +476,8 @@ TRANSLATIONS = {
         "help_title": "使用說明",
         "help_content": "1. 填寫 Cloudflare 帳戶、KV 命名空間及 API Token 並保存。\n2. 將 VPK 或 壓縮包 拖入虛線框，程式會自動解析。\n3. 在表格中可雙擊修改顯示的章節名稱。\n4. 點擊底部按鈕將修改後的內容上傳到雲端 KV。\n\n*支援批量拖入多檔案，系統會自動進行多執行緒加速解析。*",
         "update_checking": "正在檢查更新...",
-        "update_latest": "當前已經是最新版本！"
+        "update_latest": "當前已經是最新版本！",
+        "update_restarting": "正在重啟以套用更新..."
     }
 }
 
@@ -517,7 +523,10 @@ class DownloadUpdateThread(QThread):
             response.raise_for_status()
             total_length = int(response.headers.get('content-length', 0))
             
-            temp_file = tempfile.mktemp(suffix=".exe")
+            # Use mkstemp for better security/reliability
+            fd, temp_file = tempfile.mkstemp(suffix=".exe")
+            os.close(fd) # Close the file descriptor, we'll open it with 'wb'
+            
             with open(temp_file, 'wb') as f:
                 downloaded = 0
                 for chunk in response.iter_content(chunk_size=8192):
@@ -535,8 +544,7 @@ def apply_update(new_exe_path):
         return
         
     current_exe = sys.executable
-    current_dir = os.path.dirname(current_exe)
-    exe_name = os.path.basename(current_exe)
+    current_pid = os.getpid()
     
     # We create a more robust powershell-based updater script
     # It will run entirely hidden and wait until the original process is gone
@@ -544,9 +552,16 @@ def apply_update(new_exe_path):
     $ErrorActionPreference = 'Stop'
     $src = '{new_exe_path}'
     $dst = '{current_exe}'
+    $pidToWait = {current_pid}
     
     # Wait for the main process to exit completely
-    Start-Sleep -Seconds 3
+    $process = Get-Process -Id $pidToWait -ErrorAction SilentlyContinue
+    if ($process) {{
+        $process.WaitForExit(10000) # Wait up to 10 seconds
+    }}
+    
+    # Extra safety wait
+    Start-Sleep -Seconds 1
     
     $retryCount = 0
     while (Test-Path $dst) {{
@@ -559,8 +574,8 @@ def apply_update(new_exe_path):
             break
         }} catch {{
             $retryCount++
-            if ($retryCount -gt 15) {{
-                [System.Windows.Forms.MessageBox]::Show("无法重命名旧文件，请手动删除旧版并重命名新下载的文件。`n`n新文件位置: $src", "更新失败", 0, 16)
+            if ($retryCount -gt 20) {{
+                [System.Windows.Forms.MessageBox]::Show("无法更新文件，请尝试手动运行新版本。`n`n新文件位置: $src", "更新失败", 0, 16)
                 exit
             }}
             Start-Sleep -Seconds 1
@@ -674,7 +689,7 @@ class UpdateDialog(QDialog):
         
     def on_downloaded(self, filepath):
         # Change button states to indicate it's preparing to restart
-        self.btn_direct.setText("准备重启更新...")
+        self.btn_direct.setText(_("update_restarting"))
         QApplication.processEvents()
         apply_update(filepath)
         self.accept()
