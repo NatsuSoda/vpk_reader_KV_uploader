@@ -551,73 +551,38 @@ def apply_update(new_exe_path):
     current_exe = sys.executable
     current_pid = os.getpid()
     
-    # Use forward slashes to avoid PowerShell backslash issues
+    # Use forward slashes for PowerShell path compatibility
     src_path = new_exe_path.replace("\\", "/")
     dst_path = current_exe.replace("\\", "/")
     
-    # We create a more robust powershell-based updater script
-    # It will run entirely hidden and wait until the original process is gone
+    # This is an AGGRESSIVE overwrite script
+    # 1. Kill the current process immediately to release locks
+    # 2. Force delete the old EXE
+    # 3. Move the new EXE into its place
+    # 4. Start the new EXE
     ps_script = f"""
-    $ErrorActionPreference = 'Stop'
+    $ErrorActionPreference = 'SilentlyContinue'
     $src = "{src_path}"
     $dst = "{dst_path}"
-    $pidToWait = {current_pid}
+    $pidToKill = {current_pid}
     
-    # Function to check if file is locked
-    function Test-IsFileLocked($path) {{
-        if (!(Test-Path $path)) {{ return $false }}
-        try {{
-            [IO.File]::OpenWrite($path).Close()
-            return $false
-        }} catch {{
-            return $true
-        }}
-    }}
-    
-    # Wait for the main process to exit completely
-    $waitCount = 0
-    while ((Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) -and ($waitCount -lt 15)) {{
-        Start-Sleep -Seconds 1
-        $waitCount++
-    }}
-    
-    # Force kill if still alive
-    if (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
-        Stop-Process -Id $pidToWait -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
-    }}
-    
-    # Extra safety wait for file handles to release
+    # 1. Aggressively kill the process
+    Stop-Process -Id $pidToKill -Force
     Start-Sleep -Seconds 2
     
-    $retryCount = 0
-    $success = $false
-    while ($retryCount -lt 20) {{
-        try {{
-            # Renaming helps unlock the file in some Windows versions
-            $tempOld = $dst + ".old"
-            if (Test-Path $tempOld) {{ Remove-Item -Path $tempOld -Force -ErrorAction SilentlyContinue }}
-            
-            if (Test-Path $dst) {{
-                Rename-Item -Path $dst -NewName (Split-Path $tempOld -Leaf) -Force -ErrorAction Stop
-            }}
-            
-            # Now move new file
-            Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
-            $success = $true
-            break
-        }} catch {{
-            $retryCount++
-            Start-Sleep -Seconds 1
-        }}
+    # 2. Try to remove the old file until it's gone (max 10 retries)
+    $retry = 0
+    while ((Test-Path $dst) -and ($retry -lt 10)) {{
+        Remove-Item -Path $dst -Force
+        Start-Sleep -Seconds 1
+        $retry++
     }}
     
-    if ($success) {{
-        Start-Process -FilePath $dst
-    }} else {{
-        # Fallback error message if everything fails
-        [System.Windows.Forms.MessageBox]::Show("无法自动更新。程序已被占用或权限不足。`n`n请手动使用新文件替换：`n源文件：$src`n目标：$dst", "更新失败", 0, 16)
-    }}
+    # 3. Move the new file (Overwrite)
+    Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+    
+    # 4. Start the new application
+    Start-Process -FilePath $dst
     """
     
     bat_path = os.path.join(tempfile.gettempdir(), "update_l4d2_vpk.bat")
