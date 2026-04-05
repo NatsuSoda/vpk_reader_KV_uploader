@@ -41,26 +41,29 @@ jobs:
             echo "TAG_NAME=$version-build.${{ github.run_number }}" >> $env:GITHUB_OUTPUT
           }
 
-      - name: Build with PyInstaller
+      - name: Build Main Program
         run: |
-          pyinstaller --onefile --noconsole --name "vpk_reader_KV_uploader" main.py
-          pyinstaller --onefile --console --name "updater" updater.py
+          pyinstaller --onefile --noconsole --clean --name "vpk_reader_KV_uploader" main.py
+
+      - name: Build Updater
+        run: |
+          pyinstaller --onefile --console --clean --name "updater" updater.py
+
+      - name: Debug Build Output
+        run: |
+          ls dist
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: vpk_reader_KV_uploader-exe
-          path: |
-            dist/vpk_reader_KV_uploader.exe
-            dist/updater.exe
+          path: dist/*.exe
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.TAG_NAME }}
-          files: |
-            dist/vpk_reader_KV_uploader.exe
-            dist/updater.exe
+          files: dist/*.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
