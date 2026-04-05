@@ -496,6 +496,14 @@ class CheckUpdateThread(QThread):
     result_signal = pyqtSignal(bool, dict)
     
     def run(self):
+        import re
+        def parse_version(v_str):
+            # Extracts major, minor, patch version digits ignoring any "-build.X" suffix
+            m = re.search(r'v?(\d+)\.(\d+)\.(\d+)', v_str)
+            if m:
+                return tuple(map(int, m.groups()))
+            return (0, 0, 0)
+            
         try:
             resp = requests.get(REPO_API, timeout=5)
             if resp.status_code == 200:
@@ -505,10 +513,9 @@ class CheckUpdateThread(QThread):
                     self.result_signal.emit(False, {})
                     return
                 
-                # Compare versions: Only notify if they are different
-                # Supports both tag (v1.0.0) and build (v1.0.0-build.1)
-                if latest_tag != VERSION:
-                    # Optional: Could add more complex semver comparison here if needed
+                # Deep fix: Compare semver tuples instead of strict strings
+                # This eradicates the "-build.X" bug forever.
+                if parse_version(latest_tag) > parse_version(VERSION):
                     self.result_signal.emit(True, data)
                     return
         except Exception:
@@ -635,53 +642,24 @@ class UpdateDialog(QDialog):
         btn_layout = QVBoxLayout()
         
         self.btn_direct = QPushButton(_("update_direct"))
-        self.btn_direct.clicked.connect(lambda: self.start_download("direct"))
-        
-        self.btn_proxy1 = QPushButton(_("update_proxy1"))
-        self.btn_proxy1.clicked.connect(lambda: self.start_download("proxy1"))
-        
-        self.btn_proxy2 = QPushButton(_("update_proxy2"))
-        self.btn_proxy2.clicked.connect(lambda: self.start_download("proxy2"))
-        
-        self.btn_custom = QPushButton(_("update_custom"))
-        self.btn_custom.clicked.connect(lambda: self.start_download("custom"))
+        self.btn_direct.clicked.connect(self.start_download)
         
         self.btn_cancel = QPushButton(_("update_cancel"))
         self.btn_cancel.clicked.connect(self.reject)
         
         btn_layout.addWidget(self.btn_direct)
-        btn_layout.addWidget(self.btn_proxy1)
-        btn_layout.addWidget(self.btn_proxy2)
-        btn_layout.addWidget(self.btn_custom)
         btn_layout.addWidget(self.btn_cancel)
         
         layout.addLayout(btn_layout)
         
-    def start_download(self, mode):
+    def start_download(self):
         assets = self.release_data.get("assets", [])
         if not assets:
             return
         download_url = assets[0].get("browser_download_url", "")
-        
-        if mode == "proxy1":
-            download_url = "https://mirror.ghproxy.com/" + download_url
-        elif mode == "proxy2":
-            download_url = "https://gh.api.99988866.xyz/" + download_url
-        elif mode == "custom":
-            text, ok = QInputDialog.getText(self, _("custom_proxy_prompt_title"), _("custom_proxy_prompt_msg"))
-            if ok and text:
-                prefix = text.strip()
-                if prefix:
-                    if not prefix.endswith("/"):
-                        prefix += "/"
-                    download_url = prefix + download_url
-            else:
-                return
             
         self.btn_direct.setEnabled(False)
-        self.btn_proxy1.setEnabled(False)
-        self.btn_proxy2.setEnabled(False)
-        self.btn_custom.setEnabled(False)
+        self.btn_cancel.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setValue(0)
         

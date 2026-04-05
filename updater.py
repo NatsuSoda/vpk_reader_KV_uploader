@@ -6,43 +6,40 @@ import subprocess
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: updater.exe <pid_to_kill> <src_path> <dst_path>")
         return
 
     pid_to_kill = int(sys.argv[1])
     src_path = sys.argv[2]
     dst_path = sys.argv[3]
 
-    print(f"Waiting for process {pid_to_kill} to exit...")
-    
-    # 1. Kill the main process
+    # 1. Kill the main process silently
+    CREATE_NO_WINDOW = 0x08000000
     try:
-        subprocess.run(['taskkill', '/F', '/PID', str(pid_to_kill)], capture_output=True)
+        subprocess.run(['taskkill', '/F', '/PID', str(pid_to_kill)], 
+                       capture_output=True, 
+                       creationflags=CREATE_NO_WINDOW)
     except:
         pass
     
-    # Extra wait to ensure file handles are released
-    time.sleep(2)
+    # Wait to ensure process is completely gone and file locks released
+    time.sleep(3)
 
-    # 2. Aggressive file replacement
+    # 2. Aggressive file replacement (retry up to 20 times = 20 seconds max)
     success = False
-    for i in range(15):
+    for _ in range(20):
         try:
             if os.path.exists(dst_path):
                 os.remove(dst_path)
             shutil.move(src_path, dst_path)
             success = True
             break
-        except Exception as e:
-            print(f"Retry {i+1}: {e}")
+        except Exception:
             time.sleep(1)
 
+    # 3. Restart the main application
     if success:
-        print("Update successful! Restarting...")
-        subprocess.Popen([dst_path], creationflags=subprocess.DETACHED_PROCESS)
-    else:
-        print("Update failed. Please manually replace the file.")
-        input("Press Enter to exit...")
+        DETACHED_PROCESS = 0x00000008
+        subprocess.Popen([dst_path], creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW)
 
 if __name__ == "__main__":
     main()
