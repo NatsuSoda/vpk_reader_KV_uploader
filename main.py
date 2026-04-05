@@ -558,60 +558,57 @@ def apply_update(new_exe_path):
     current_exe = sys.executable
     current_pid = os.getpid()
     
-    # Use forward slashes for PowerShell path compatibility
-    src_path = new_exe_path.replace("\\", "/")
-    dst_path = current_exe.replace("\\", "/")
+    # The 'Killer' Solution:
+    # Use an external 'updater.exe' to handle the file swap.
+    # This prevents 'Python DLL' errors because the updater is its own independent process.
     
-    # This is an AGGRESSIVE overwrite script
-    # 1. Kill the current process immediately to release locks
-    # 2. Force delete the old EXE
-    # 3. Move the new EXE into its place
-    # 4. Start the new EXE
-    ps_script = f"""
-    $ErrorActionPreference = 'SilentlyContinue'
-    $src = "{src_path}"
-    $dst = "{dst_path}"
-    $pidToKill = {current_pid}
+    updater_exe = os.path.join(os.path.dirname(current_exe), "updater.exe")
     
-    # 1. Aggressively kill the process
-    Stop-Process -Id $pidToKill -Force
-    Start-Sleep -Seconds 2
-    
-    # 2. Try to remove the old file until it's gone (max 10 retries)
-    $retry = 0
-    while ((Test-Path $dst) -and ($retry -lt 10)) {{
-        Remove-Item -Path $dst -Force
-        Start-Sleep -Seconds 1
-        $retry++
-    }}
-    
-    # 3. Move the new file (Overwrite)
-    Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
-    
-    # 4. Start the new application
-    Start-Process -FilePath $dst
-    """
-    
-    bat_path = os.path.join(tempfile.gettempdir(), "update_l4d2_vpk.bat")
-    ps_path = os.path.join(tempfile.gettempdir(), "update_l4d2_vpk.ps1")
-    
-    with open(ps_path, "w", encoding="utf-8-sig") as f:
-        f.write(ps_script)
+    if os.path.exists(updater_exe):
+        # Detach the updater process completely
+        subprocess.Popen([updater_exe, str(current_pid), new_exe_path, current_exe], 
+                         creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS)
+        QApplication.quit()
+        sys.exit(0)
+    else:
+        # Fallback to the aggressive powershell script if updater.exe is missing
+        ps_script = f"""
+        $ErrorActionPreference = 'SilentlyContinue'
+        $src = "{new_exe_path.replace('\\', '/')}"
+        $dst = "{current_exe.replace('\\', '/')}"
+        $pidToKill = {current_pid}
         
-    with open(bat_path, "w", encoding="utf-8") as f:
-        f.write(f"""@echo off
-powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps_path}"
-del "{ps_path}"
-del "%~f0"
-""")
+        Stop-Process -Id $pidToKill -Force
+        Start-Sleep -Seconds 2
+        
+        $retry = 0
+        while ((Test-Path $dst) -and ($retry -lt 10)) {{
+            Remove-Item -Path $dst -Force
+            Start-Sleep -Seconds 1
+            $retry++
+        }}
+        
+        Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+        Start-Process -FilePath $dst
+        """
+        
+        bat_path = os.path.join(tempfile.gettempdir(), "update_l4d2_vpk.bat")
+        ps_path = os.path.join(tempfile.gettempdir(), "update_l4d2_vpk.ps1")
+        
+        with open(ps_path, "w", encoding="utf-8-sig") as f:
+            f.write(ps_script)
+            
+        with open(bat_path, "w", encoding="utf-8") as f:
+            f.write(f"""@echo off
+    powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps_path}"
+    del "{ps_path}"
+    del "%~f0"
+    """)
 
-    # Detach the process completely
-    DETACHED_PROCESS = 0x00000008
-    subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=DETACHED_PROCESS, close_fds=True)
-    
-    # Terminate the application immediately
-    QApplication.quit()
-    sys.exit(0)
+        DETACHED_PROCESS = 0x00000008
+        subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=DETACHED_PROCESS, close_fds=True)
+        QApplication.quit()
+        sys.exit(0)
 
 class UpdateDialog(QDialog):
     def __init__(self, parent, release_data):

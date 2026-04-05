@@ -44,18 +44,23 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --onefile --noconsole --name "vpk_reader_KV_uploader" main.py
+          pyinstaller --onefile --console --name "updater" updater.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: vpk_reader_KV_uploader-exe
-          path: dist/vpk_reader_KV_uploader.exe
+          path: |
+            dist/vpk_reader_KV_uploader.exe
+            dist/updater.exe
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.TAG_NAME }}
-          files: dist/vpk_reader_KV_uploader.exe
+          files: |
+            dist/vpk_reader_KV_uploader.exe
+            dist/updater.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
