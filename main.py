@@ -519,7 +519,7 @@ class DownloadUpdateThread(QThread):
 
     def run(self):
         try:
-            response = requests.get(self.download_url, stream=True, timeout=10)
+            response = requests.get(self.download_url, stream=True, timeout=20)
             response.raise_for_status()
             total_length = int(response.headers.get('content-length', 0))
             
@@ -527,14 +527,19 @@ class DownloadUpdateThread(QThread):
             fd, temp_file = tempfile.mkstemp(suffix=".exe")
             os.close(fd) # Close the file descriptor, we'll open it with 'wb'
             
+            downloaded = 0
             with open(temp_file, 'wb') as f:
-                downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=1024*64): # Use larger chunks
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
                         if total_length > 0:
                             self.progress_signal.emit(int(downloaded * 100 / total_length))
+            
+            # Basic integrity check: size should be > 1MB at least for a PyInstaller exe
+            if downloaded < 1024 * 1024:
+                raise Exception(f"Downloaded file is too small ({downloaded} bytes). It might be corrupted.")
+                
             self.finished_signal.emit(temp_file)
         except Exception as e:
             self.error_signal.emit(str(e))
@@ -546,45 +551,73 @@ def apply_update(new_exe_path):
     current_exe = sys.executable
     current_pid = os.getpid()
     
+    # Use forward slashes to avoid PowerShell backslash issues
+    src_path = new_exe_path.replace("\\", "/")
+    dst_path = current_exe.replace("\\", "/")
+    
     # We create a more robust powershell-based updater script
     # It will run entirely hidden and wait until the original process is gone
     ps_script = f"""
     $ErrorActionPreference = 'Stop'
-    $src = '{new_exe_path}'
-    $dst = '{current_exe}'
+    $src = "{src_path}"
+    $dst = "{dst_path}"
     $pidToWait = {current_pid}
     
-    # Wait for the main process to exit completely
-    $process = Get-Process -Id $pidToWait -ErrorAction SilentlyContinue
-    if ($process) {{
-        $process.WaitForExit(10000) # Wait up to 10 seconds
+    # Function to check if file is locked
+    function Test-IsFileLocked($path) {{
+        if (!(Test-Path $path)) {{ return $false }}
+        try {{
+            [IO.File]::OpenWrite($path).Close()
+            return $false
+        }} catch {{
+            return $true
+        }}
     }}
     
-    # Extra safety wait
-    Start-Sleep -Seconds 1
+    # Wait for the main process to exit completely
+    $waitCount = 0
+    while ((Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) -and ($waitCount -lt 15)) {{
+        Start-Sleep -Seconds 1
+        $waitCount++
+    }}
+    
+    # Force kill if still alive
+    if (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
+        Stop-Process -Id $pidToWait -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }}
+    
+    # Extra safety wait for file handles to release
+    Start-Sleep -Seconds 2
     
     $retryCount = 0
-    while (Test-Path $dst) {{
+    $success = $false
+    while ($retryCount -lt 20) {{
         try {{
-            # Try to rename the old executable to a temporary name
-            # This works even if the _MEI folder is locked, avoiding DLL load errors
+            # Renaming helps unlock the file in some Windows versions
             $tempOld = $dst + ".old"
             if (Test-Path $tempOld) {{ Remove-Item -Path $tempOld -Force -ErrorAction SilentlyContinue }}
-            Rename-Item -Path $dst -NewName (Split-Path $tempOld -Leaf) -Force -ErrorAction Stop
+            
+            if (Test-Path $dst) {{
+                Rename-Item -Path $dst -NewName (Split-Path $tempOld -Leaf) -Force -ErrorAction Stop
+            }}
+            
+            # Now move new file
+            Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+            $success = $true
             break
         }} catch {{
             $retryCount++
-            if ($retryCount -gt 20) {{
-                [System.Windows.Forms.MessageBox]::Show("无法更新文件，请尝试手动运行新版本。`n`n新文件位置: $src", "更新失败", 0, 16)
-                exit
-            }}
             Start-Sleep -Seconds 1
         }}
     }}
     
-    # Now we can safely move the new file to the destination
-    Move-Item -Path $src -Destination $dst -Force
-    Start-Process -FilePath $dst
+    if ($success) {{
+        Start-Process -FilePath $dst
+    }} else {{
+        # Fallback error message if everything fails
+        [System.Windows.Forms.MessageBox]::Show("无法自动更新。程序已被占用或权限不足。`n`n请手动使用新文件替换：`n源文件：$src`n目标：$dst", "更新失败", 0, 16)
+    }}
     """
     
     bat_path = os.path.join(tempfile.gettempdir(), "update_l4d2_vpk.bat")
