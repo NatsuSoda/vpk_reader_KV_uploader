@@ -500,8 +500,15 @@ class CheckUpdateThread(QThread):
             resp = requests.get(REPO_API, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
-                latest_version = data.get("tag_name", "")
-                if latest_version and latest_version != VERSION:
+                latest_tag = data.get("tag_name", "")
+                if not latest_tag:
+                    self.result_signal.emit(False, {})
+                    return
+                
+                # Compare versions: Only notify if they are different
+                # Supports both tag (v1.0.0) and build (v1.0.0-build.1)
+                if latest_tag != VERSION:
+                    # Optional: Could add more complex semver comparison here if needed
                     self.result_signal.emit(True, data)
                     return
         except Exception:
