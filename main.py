@@ -571,11 +571,13 @@ def apply_update(new_exe_path):
         QApplication.quit()
         sys.exit(0)
     else:
+        src_ps = new_exe_path.replace("\\", "/")
+        dst_ps = current_exe.replace("\\", "/")
         # Fallback to the aggressive powershell script if updater.exe is missing
         ps_script = f"""
         $ErrorActionPreference = 'SilentlyContinue'
-        $src = "{new_exe_path.replace('\\', '/')}"
-        $dst = "{current_exe.replace('\\', '/')}"
+        $src = "{src_ps}"
+        $dst = "{dst_ps}"
         $pidToKill = {current_pid}
         
         Stop-Process -Id $pidToKill -Force
